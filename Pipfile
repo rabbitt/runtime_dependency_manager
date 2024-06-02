@@ -1,0 +1,17 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+packaging = "*"
+
+[dev-packages]
+build = "*"
+setuptools_scm = "*"
+twine = "*"
+wheel = "*"
+coverage = "*"
+
+[requires]
+python_version = "3.9"
