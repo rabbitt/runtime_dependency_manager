@@ -51,7 +51,7 @@ class TestRuntimeDependencyManager(unittest.TestCase):
             '--index-url', 'https://pypi.org/simple', 
             '--extra-index-url', 'https://extra.index.url', 
             '--trusted-host', 'https://trusted.host'
-        ] + package_checks)
+        ] + package_checks, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         
     @patch('runtime_dependency_manager.manager.subprocess.check_call', return_value=None)
@@ -141,22 +141,25 @@ class TestRuntimeDependencyManager(unittest.TestCase):
             exec.assert_any_call(f"from test_from import test_module as test_alias", mock_globals.return_value)
 
     @patch('runtime_dependency_manager.manager.logger')
-    @patch('builtins.globals', return_value={})
+    @patch('runtime_dependency_manager.manager.inspect.currentframe', return_value=MagicMock())
     @patch('builtins.exec', MagicMock())
-    def test_import_module(self, mock_globals, mock_logger):
+    def test_import_module(self, mock_currentframe, mock_logger):
+        mock_globals = {'__name__': '__main__'}
+        mock_currentframe.return_value.f_back.f_globals = mock_globals
+
         mgr = RuntimeDependencyManager()
 
         # Test import with alias
         imp = {'type': 'import', 'module': 'test_module', 'alias': 'test_alias'}
         with patch('runtime_dependency_manager.manager.importlib.import_module', return_value=MagicMock()):
-            mgr._import_module(imp)
-            self.assertIn('test_alias', mock_globals.return_value)
+            mgr._import_module(Package('module'), imp)
+            self.assertIn('test_alias', mock_globals)
 
         # Test from import with alias
         imp = {'type': 'from', 'from': 'test_from', 'module': 'test_module', 'alias': 'test_alias'}
         with patch('runtime_dependency_manager.manager.importlib.import_module', return_value=MagicMock()):
-            mgr._import_module(imp)
-            self.assertIn('test_alias', mock_globals.return_value)
+            mgr._import_module(Package('test_from'), imp)
+            self.assertIn('test_alias', mock_globals)
 
     def test_is_version_satisfying(self):
         mgr = RuntimeDependencyManager()

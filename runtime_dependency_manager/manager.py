@@ -6,25 +6,26 @@ It is designed for simple scripts that do not use a requirements.txt file.
 
 Example usage:
 
-    with RuntimeDependencyManager(install_if_missing=True) as mgr:
-        mgr.index_url = 'https://pypi.org/simple'
-        mgr.trusted_hosts = ['https://example.com']
-        
-        with mgr.package('IPy', '>=1.1') as pkg:
-            pkg.from_module('IPy').import_modules('IP', 'IPSet')
+with RuntimeDependencyManager(install_if_missing=True) as mgr:
+    mgr.index_url = 'https://pypi.org/simple'
+    mgr.trusted_hosts = ['https://example.com']
+    
+    with mgr.package('IPy', '>=1.1') as pkg:
+        pkg.from_module('IPy').import_modules('IP', 'IPSet')
 
-        with mgr.package('pymongo', '>=3.11.4, <4.0.0') as pkg:
-            pkg.import_module('pymongo')
-            pkg.from_module('bson').import_module('ObjectId')
+    with mgr.package('pymongo', '>=3.11.4, <4.0.0') as pkg:
+        pkg.import_module('pymongo')
+        pkg.from_module('bson').import_module('ObjectId')
 
-        with mgr.package('paramiko', '==2.7.2') as pkg:
-            pkg.import_modules('SSHClient', 'AutoAddPolicy', 'SSHConfig', 'SSHException')
+    with mgr.package('paramiko', '==2.7.2') as pkg:
+        pkg.import_modules('SSHClient', 'AutoAddPolicy', 'SSHConfig', 'SSHException')
 
-        with mgr.package('pyyaml', '>=5.4.1, <6.0.0', optional=True) as pkg:
-            pkg.import_module('yaml')
+    with mgr.package('pyyaml', '>=5.4.1, <6.0.0', optional=True) as pkg:
+        pkg.import_module('yaml')
 """
 
 import importlib
+import inspect
 import logging
 import subprocess
 import sys
@@ -189,11 +190,15 @@ class RuntimeDependencyManager:
         extra_index_urls: Optional[list[str]] = None,
         trusted_hosts: Optional[list[str]] = None
     ):
+        # use the callers reference to globals for importing modules
+        self.caller_globals = inspect.currentframe().f_back.f_globals
+
         self.packages: list[Package] = []
         self.install_if_missing = install_if_missing
         self.index_url = index_url
         self.extra_index_urls = extra_index_urls or []
         self.trusted_hosts = trusted_hosts or []
+        
 
     def package(self, name: str, version_spec: Optional[str] = None, optional: bool = False) -> Package:
         """
@@ -276,19 +281,20 @@ class RuntimeDependencyManager:
             bool: True if import is successful, False otherwise.
         """
         try:
-            if imp['type'] == 'import':
-                module_name = imp['module']
-                if 'alias' in imp:
-                    exec(f"import {module_name} as {imp['alias']}", globals())
-                else:
-                    exec(f"import {module_name}", globals())
-            elif imp['type'] == 'from':
-                from_name = imp['from']
-                module_name = imp['module']
-                if 'alias' in imp:
-                    exec(f"from {from_name} import {module_name} as {imp['alias']}", globals())
-                else:
-                    exec(f"from {from_name} import {module_name}", globals())
+            statement: str = f"import {imp['module']}"
+            
+            if imp['type'] == 'from':
+                statement = f"from {imp['from']} {statement}"
+            
+            if 'alias' in imp:
+                statement = f"{statement} as {imp['alias']}"
+            
+            logger.debug(f'_try_import: {statement}')
+            
+            # we're just checking if the import would work; no need to 
+            # add it to the global scope here
+            exec(statement, {})
+            
             return True
         except ImportError:
             return False
@@ -299,9 +305,9 @@ class RuntimeDependencyManager:
         """
         for pkg in self.packages:
             for imp in pkg.imports:
-                self._import_module(imp)
+                self._import_module(pkg, imp)
 
-    def _import_module(self, imp: dict):
+    def _import_module(self, pkg: Package, imp: dict):
         """
         Imports a module based on the import statement.
 
@@ -309,21 +315,20 @@ class RuntimeDependencyManager:
             imp (dict): The import statement dictionary.
         """
         try:
+            global_id = imp['alias'] if 'alias' in imp else imp['module']
+            
             if imp['type'] == 'import':
-                module_name = imp['module']
-                if 'alias' in imp:
-                    globals()[imp['alias']] = importlib.import_module(module_name)
-                else:
-                    globals()[module_name] = importlib.import_module(module_name)
+                self.caller_globals[global_id] = importlib.import_module(global_id)
             elif imp['type'] == 'from':
-                from_name = imp['from']
-                module_name = imp['module']
-                if 'alias' in imp:
-                    globals()[imp['alias']] = getattr(importlib.import_module(from_name), module_name)
-                else:
-                    globals()[module_name] = getattr(importlib.import_module(from_name), module_name)
+                self.caller_globals[global_id] = getattr(importlib.import_module(imp['from']), imp['module'])
         except ImportError as e:
-            logger.error("Error importing %s from %s: %s", imp['module'], imp.get('from', ''), str(e))
+            if imp['type'] == 'import':
+                logger.error("Error importing %s: %s; are you missing from_module('%s') ?", imp['module'], str(e), pkg.name)
+            elif imp['type'] == 'from':
+                logger.error("Error importing %s from %s: %s", imp['module'], imp.get('from', ''), str(e))
+            else:
+                logger.error("Error importing import: %s; %s", imp, str(e))
+                
 
     def _install_missing_packages(self, packages: list[Package]):
         """
@@ -332,21 +337,21 @@ class RuntimeDependencyManager:
         Args:
             packages (list[Package]): List of packages to install.
         """
-        try:
-            cmd = [sys.executable, '-m', 'pip', 'install']
+        cmd = [sys.executable, '-m', 'pip', 'install']
+        
+        if self.index_url:
+            cmd.extend(['--index-url', self.index_url])
             
-            if self.index_url:
-                cmd.extend(['--index-url', self.index_url])
-                
-            for url in self.extra_index_urls:
-                cmd.extend(['--extra-index-url', url])
-                
-            for host in self.trusted_hosts:
-                cmd.extend(['--trusted-host', host])
+        for url in self.extra_index_urls:
+            cmd.extend(['--extra-index-url', url])
             
-            cmd.extend([f"{pkg.name}{pkg.version_spec}" if pkg.version_spec else pkg.name for pkg in packages])
+        for host in self.trusted_hosts:
+            cmd.extend(['--trusted-host', host])
+        
+        cmd.extend([f"{pkg.name}{pkg.version_spec}" if pkg.version_spec else pkg.name for pkg in packages])
 
-            subprocess.check_call(cmd)
+        try:
+            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             for pkg in packages:
                 if pkg.version_spec:
@@ -354,6 +359,7 @@ class RuntimeDependencyManager:
 
         except subprocess.CalledProcessError as e:
             logger.error("Error installing packages: %s", str(e))
+            logger.error("  command: %s", ' '.join(cmd))
             raise PackageInstallationError(f"Error installing packages: {str(e)}")
 
     def _check_version_compatibility(self, pkg: Package):
