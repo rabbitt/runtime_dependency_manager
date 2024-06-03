@@ -27,6 +27,7 @@ with RuntimeDependencyManager(install_if_missing=True) as mgr:
 import importlib
 import inspect
 import logging
+import shlex
 import subprocess
 import sys
 
@@ -70,7 +71,7 @@ class Package:
     """
     def __init__(self, name: str, version_spec: Optional[str] = None, optional: bool = False):
         self.name = name
-        self.version_spec = str(Requirement(f'pkgname{version_spec}').specifier) # normalize
+        self.version_spec = str(Requirement(f'pkgname{version_spec or ">0"}').specifier) # normalize
         self.optional = optional
         self.imports: list[dict] = []
 
@@ -191,7 +192,7 @@ class RuntimeDependencyManager:
         trusted_hosts: Optional[list[str]] = None
     ):
         # use the callers reference to globals for importing modules
-        self.caller_globals = inspect.currentframe().f_back.f_globals
+        self.caller_globals = inspect.currentframe().f_back.f_globals # type: ignore
 
         self.packages: list[Package] = []
         self.install_if_missing = install_if_missing
@@ -328,8 +329,11 @@ class RuntimeDependencyManager:
                 logger.error("Error importing %s from %s: %s", imp['module'], imp.get('from', ''), str(e))
             else:
                 logger.error("Error importing import: %s; %s", imp, str(e))
+        except AttributeError as e:
+            # this should only happen in the event of a "from module import X" failing because 
+            # 'module' doesn't have the requested attribute
+            logger.error("Error importing %s from %s: %s", imp['module'], imp.get('from', ''), str(e))
                 
-
     def _install_missing_packages(self, packages: list[Package]):
         """
         Installs missing packages using pip.
@@ -337,30 +341,37 @@ class RuntimeDependencyManager:
         Args:
             packages (list[Package]): List of packages to install.
         """
-        cmd = [sys.executable, '-m', 'pip', 'install']
+        cmd_base = [sys.executable, '-m', 'pip', 'install']
         
         if self.index_url:
-            cmd.extend(['--index-url', self.index_url])
+            cmd_base.extend(['--index-url', self.index_url])
             
         for url in self.extra_index_urls:
-            cmd.extend(['--extra-index-url', url])
+            cmd_base.extend(['--extra-index-url', url])
             
         for host in self.trusted_hosts:
-            cmd.extend(['--trusted-host', host])
+            cmd_base.extend(['--trusted-host', host])
         
-        cmd.extend([f"{pkg.name}{pkg.version_spec}" if pkg.version_spec else pkg.name for pkg in packages])
-
-        try:
-            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            for pkg in packages:
+        for pkg in packages:
+            cmd = cmd_base.copy()
+            cmd.extend([f"{pkg.name}{pkg.version_spec}" if pkg.version_spec else pkg.name])
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            logging.debug(f"Running: {' '.join(shlex.quote(arg) for arg in cmd)}")
+            
+            if result.returncode != 0:
+                if 'No matching distribution' in result.stderr:
+                    raise DependentPackageNotFoundError(pkg.name)
+                
+                failed_cmd = ' '.join(shlex.quote(arg) for arg in cmd)
+                logger.error("Error installing package: %s: %s", pkg.name, result.stderr)
+                logger.error("Failed command: %s", failed_cmd)
+                logger.error("Command output: %s", result.stdout)
+                raise PackageInstallationError(f"Error installing package {pkg.name}")
+            else:
                 if pkg.version_spec:
                     self._check_version_compatibility(pkg)
-
-        except subprocess.CalledProcessError as e:
-            logger.error("Error installing packages: %s", str(e))
-            logger.error("  command: %s", ' '.join(cmd))
-            raise PackageInstallationError(f"Error installing packages: {str(e)}")
 
     def _check_version_compatibility(self, pkg: Package):
         """

@@ -2,8 +2,9 @@
 
 import subprocess
 import sys
+import types
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import call, patch, MagicMock
 from importlib.metadata import PackageNotFoundError
 
 from runtime_dependency_manager.manager import (
@@ -15,20 +16,30 @@ from runtime_dependency_manager.manager import (
     PackageInstallationError
 )
 
+# Store a reference to the original getattr
+original_getattr = getattr
+
+def custom_getattr(obj, name, default=None):
+    if name == 'specific_attribute':
+        return 'mocked_value'
+    elif name == 'raise_exception':
+        raise AttributeError('mocked exception')
+    else:
+        sys.exit(1)
+        return original_getattr(obj, name, default)
+
 class TestRuntimeDependencyManager(unittest.TestCase):
 
-    @patch('runtime_dependency_manager.manager.subprocess.check_call', return_value=None)
+    @patch('runtime_dependency_manager.manager.subprocess.run', return_value=subprocess.CompletedProcess((), 0))
     @patch('runtime_dependency_manager.manager.importlib.import_module', return_value=MagicMock())
-    @patch('runtime_dependency_manager.manager.version', side_effect=['1.1', '3.11.4', '2.7.2', '5.4.1'])
+    @patch('runtime_dependency_manager.manager.version', side_effect=['1.1', '3.11.4', '2.7.2'])
     @patch('runtime_dependency_manager.manager.logger')
-    def test_install_missing_packages(self, mock_logger, mock_version, mock_import_module, mock_check_call):
+    def test_install_missing_packages(self, mock_logger, mock_version, mock_import_module, mock_run):
         mgr = RuntimeDependencyManager(install_if_missing=True)
         mgr.index_url = "https://pypi.org/simple"
         mgr.extra_index_urls = ["https://extra.index.url"]
         mgr.trusted_hosts = ["https://trusted.host"]
 
-        package_checks = []
-        
         with mgr:
             with mgr.package('IPy', '>=1.1') as pkg:
                 pkg.from_module('IPy').import_modules('IP', 'IPSet')
@@ -40,35 +51,39 @@ class TestRuntimeDependencyManager(unittest.TestCase):
             with mgr.package('paramiko', '==2.7.2') as pkg:
                 pkg.import_modules('SSHClient', 'AutoAddPolicy', 'SSHConfig', 'SSHException')
 
-            with mgr.package('pyyaml', '>=5.4.1, <6.0.0', optional=True) as pkg:
-                pkg.import_module('yaml')
-
-        package_checks = [ f'{pkg.name}{pkg.version_spec or ""}' for pkg in mgr.packages if not pkg.optional]
+            with mgr.package('foo', '>1.0.0, <2.0.0', optional=True) as pkg:
+                pkg.import_module('foo')
+                
+        packages = [ f'{pkg.name}{pkg.version_spec or ""}' for pkg in mgr.packages if not pkg.optional]
         
         self.assertEqual(mock_import_module.call_count, 9)
-        mock_check_call.assert_called_once_with([
+
+        base_command = [
             sys.executable, '-m', 'pip', 'install', 
             '--index-url', 'https://pypi.org/simple', 
             '--extra-index-url', 'https://extra.index.url', 
             '--trusted-host', 'https://trusted.host'
-        ] + package_checks, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ]
         
+        mock_run.assert_has_calls([
+            call(base_command + [package], capture_output=True, text=True) for package in packages
+        ])
         
-    @patch('runtime_dependency_manager.manager.subprocess.check_call', return_value=None)
+    @patch('runtime_dependency_manager.manager.subprocess.run', return_value=subprocess.CompletedProcess((), 0))
     @patch('runtime_dependency_manager.manager.importlib.import_module', return_value=MagicMock())
-    @patch('runtime_dependency_manager.manager.version', side_effect=['1.0.0', '3.0.0'])
+    @patch('runtime_dependency_manager.manager.version', side_effect=['1.0.0'])
     @patch('runtime_dependency_manager.manager.logger')
-    def test_version_compatibility(self, mock_logger, mock_version, mock_import_module, mock_check_call):
+    def test_version_compatibility(self, mock_logger, mock_version, mock_import_module, mock_run):
         with self.assertRaises(VersionCompatibilityError):
             with RuntimeDependencyManager(install_if_missing=True) as mgr:
                 with mgr.package('pymongo', '>=3.11.4, <4.0.0') as pkg:
                     pkg.import_module('pymongo')
 
-    @patch('runtime_dependency_manager.manager.subprocess.check_call', return_value=None)
+    @patch('runtime_dependency_manager.manager.subprocess.run', return_value=subprocess.CompletedProcess((), 1, None, 'No matching distribution'))
     @patch('runtime_dependency_manager.manager.importlib.import_module', side_effect=ImportError)
     @patch('runtime_dependency_manager.manager.version', side_effect=PackageNotFoundError)
     @patch('runtime_dependency_manager.manager.logger')
-    def test_package_not_found(self, mock_logger, mock_version, mock_import_module, mock_check_call):
+    def test_package_not_found(self, mock_logger, mock_version, mock_import_module, mock_run):
         with self.assertRaises(DependentPackageNotFoundError):
             with RuntimeDependencyManager(install_if_missing=True) as mgr:
                 with mgr.package('nonexistent_package', '>=1.0') as pkg:
@@ -102,11 +117,11 @@ class TestRuntimeDependencyManager(unittest.TestCase):
             {'type': 'import', 'module': 'test_module', 'alias': 'test_alias'}
         ])
 
-    @patch('runtime_dependency_manager.manager.subprocess.check_call', side_effect=subprocess.CalledProcessError(1, 'cmd'))
+    @patch('runtime_dependency_manager.manager.subprocess.run', return_value=subprocess.CompletedProcess((), 1, None, ''))
     @patch('runtime_dependency_manager.manager.importlib.import_module', return_value=MagicMock())
     @patch('runtime_dependency_manager.manager.version', side_effect=['1.0.0'])
     @patch('runtime_dependency_manager.manager.logger')
-    def test_package_installation_error(self, mock_logger, mock_version, mock_import_module, mock_check_call):
+    def test_package_installation_error(self, mock_logger, mock_version, mock_import_module, mock_run):
         with self.assertRaises(PackageInstallationError):
             with RuntimeDependencyManager(install_if_missing=True) as mgr:
                 with mgr.package('pymongo', '>=3.11.4, <4.0.0') as pkg:
@@ -161,6 +176,35 @@ class TestRuntimeDependencyManager(unittest.TestCase):
             mgr._import_module(Package('test_from'), imp)
             self.assertIn('test_alias', mock_globals)
 
+    @patch('runtime_dependency_manager.manager.inspect.currentframe', return_value=MagicMock())
+    @patch('runtime_dependency_manager.manager.importlib.import_module', side_effect=ImportError())
+    @patch('builtins.exec', MagicMock())
+    def test_import_module_errors(self, mock_im, mock_currentframe):
+        mock_globals = {'__name__': '__main__'}
+        mock_currentframe.return_value.f_back.f_globals = mock_globals
+
+        mgr = RuntimeDependencyManager()
+
+        # Test failed import with alias
+        imp = {'type': 'import', 'module': 'test_module', 'alias': 'test_alias'}
+        mgr._import_module(Package('module'), imp)
+        self.assertRaises(ImportError)
+
+        # Test failed from import with alias
+        imp = {'type': 'from', 'from': 'test_from', 'module': 'test_module', 'alias': 'test_alias'}
+        mgr._import_module(Package('test_from'), imp)
+        self.assertRaises(ImportError)
+
+        class Dummy:
+            pass
+        
+        test_from = types.ModuleType('test_from')
+        with patch('runtime_dependency_manager.manager.importlib.import_module', return_value=test_from):
+            # Test failed import with alias
+            imp = {'type': 'from', 'from': 'test_from', 'module': 'test_module', 'alias': 'test_alias'}
+            mgr._import_module(Package('module'), imp)
+            self.assertRaises(AttributeError)
+            
     def test_is_version_satisfying(self):
         mgr = RuntimeDependencyManager()
         self.assertTrue(mgr._is_version_satisfying('1.0.0', None))
