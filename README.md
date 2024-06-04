@@ -59,15 +59,8 @@ with RuntimeDependencyManager(install_if_missing=True) as mgr:
 
 - **`import_module(module_name)`**: Adds an import statement for the specified module.
 - **`import_modules(*modules)`**: Adds import statements for multiple modules.
-- **`from_module(from_name)`**: Creates an ImportFrom object for importing specific items from a module.
+- **`from_module(from_name)`**: Converts an 'import x' statement to a 'from y import x' statement, when combined with import_module(s)
 - **`as_module(alias)`**: Specifies an alias for the imported module.
-
-### ImportFrom
-
-#### Methods
-
-- **`import_module(module_name)`**: Adds an import statement for importing a specific item from a module.
-- **`import_modules(*modules)`**: Adds import statements for importing multiple items from a module.
 
 ## License
 

@@ -48,7 +48,7 @@ class TestRuntimeDependencyManager(unittest.TestCase):
 
     @patch('runtime_dependency_manager.manager.subprocess.run', return_value=subprocess.CompletedProcess((), 0))
     @patch('runtime_dependency_manager.manager.importlib.import_module', return_value=MagicMock())
-    @patch('runtime_dependency_manager.manager.version', side_effect=['1.1', '3.11.4', '2.7.2'])
+    @patch('runtime_dependency_manager.manager.version', side_effect=['1.1', '3.11.4', '2.7.2','1.0.1'])
     @patch('runtime_dependency_manager.manager.logger')
     def test_install_missing_packages(self, mock_logger, mock_version, mock_import_module, mock_run):
         mgr = RuntimeDependencyManager(install_if_missing=True)
@@ -57,18 +57,18 @@ class TestRuntimeDependencyManager(unittest.TestCase):
         mgr.trusted_hosts = ["https://trusted.host"]
 
         with mgr:
-            with mgr.package('IPy', '>=1.1') as pkg:
-                pkg.from_module('IPy').import_modules('IP', 'IPSet')
+            with mgr.package('test_module_a', '>=1.1') as pkg:
+                pkg.from_module('test_module_a').import_modules('test_module_a_sub_1', 'test_module_a_sub_2')
 
-            with mgr.package('pymongo', '>=3.11.4, <4.0.0') as pkg:
-                pkg.import_module('pymongo')
-                pkg.from_module('bson').import_module('ObjectId')
+            with mgr.package('test_module_b', '>=3.11.4, <4.0.0') as pkg:
+                pkg.import_module('test_module_b')
+                pkg.from_module('test_module_c').import_module('test_module_c_sub_1')
 
-            with mgr.package('paramiko', '==2.7.2') as pkg:
-                pkg.import_modules('SSHClient', 'AutoAddPolicy', 'SSHConfig', 'SSHException')
+            with mgr.package('test_module_d', '==2.7.2') as pkg:
+                pkg.import_modules('test_module_d_sub_1', 'test_module_d_sub_2', 'test_module_d_sub_3', 'test_module_d_sub_4')
 
-            with mgr.package('foo', '>1.0.0, <2.0.0', optional=True) as pkg:
-                pkg.import_module('foo')
+            with mgr.package('test_module_e', '>1.0.0, <2.0.0', optional=True) as pkg:
+                pkg.import_module('test_module_e')
                 
         packages = [ f'{pkg.name}{pkg.version_spec or ""}' for pkg in mgr.packages if not pkg.optional]
         
@@ -92,8 +92,8 @@ class TestRuntimeDependencyManager(unittest.TestCase):
     def test_version_compatibility(self, mock_logger, mock_version, mock_import_module, mock_run):
         with self.assertRaises(VersionCompatibilityError):
             with RuntimeDependencyManager(install_if_missing=True) as mgr:
-                with mgr.package('pymongo', '>=3.11.4, <4.0.0') as pkg:
-                    pkg.import_module('pymongo')
+                with mgr.package('test_module', '>=3.11.4, <4.0.0') as pkg:
+                    pkg.import_module('test_module')
 
     @patch('runtime_dependency_manager.manager.subprocess.run', return_value=subprocess.CompletedProcess((), 1, None, 'No matching distribution'))
     @patch('runtime_dependency_manager.manager.importlib.import_module', side_effect=ImportError)
@@ -140,8 +140,8 @@ class TestRuntimeDependencyManager(unittest.TestCase):
     def test_package_installation_error(self, mock_logger, mock_version, mock_import_module, mock_run):
         with self.assertRaises(PackageInstallationError):
             with RuntimeDependencyManager(install_if_missing=True) as mgr:
-                with mgr.package('pymongo', '>=3.11.4, <4.0.0') as pkg:
-                    pkg.import_module('pymongo')
+                with mgr.package('test_module', '>=3.11.4, <4.0.0') as pkg:
+                    pkg.import_module('test_module')
 
     @patch('runtime_dependency_manager.manager.importlib.import_module', return_value=MagicMock())
     @patch('builtins.globals', return_value={})
@@ -192,10 +192,11 @@ class TestRuntimeDependencyManager(unittest.TestCase):
             mgr._import_module(Package('test_from'), imp)
             self.assertIn('test_alias', mock_globals)
 
+    @patch('runtime_dependency_manager.manager.logger')
     @patch('runtime_dependency_manager.manager.inspect.currentframe', return_value=MagicMock())
     @patch('runtime_dependency_manager.manager.importlib.import_module', side_effect=ImportError())
     @patch('builtins.exec', MagicMock())
-    def test_import_module_errors(self, mock_im, mock_currentframe):
+    def test_import_module_errors(self, mock_im, mock_currentframe, mock_logger):
         mock_globals = {'__name__': '__main__'}
         mock_currentframe.return_value.f_back.f_globals = mock_globals
 

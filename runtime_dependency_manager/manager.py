@@ -209,12 +209,17 @@ class RuntimeDependencyManager:
         self.caller_globals = inspect.currentframe().f_back.f_globals # type: ignore
 
         self.packages: list[Package] = []
-        self.install_if_missing = install_if_missing
+        self.install_if_missing = bool(install_if_missing)
         self.index_url = index_url
         self.extra_index_urls = extra_index_urls or []
         self.trusted_hosts = trusted_hosts or []
         
-
+    @property
+    def missing_packages(self) -> list[Package]:
+        if getattr(self, '__missing_packages', None) is None:
+           self.__missing_packages = self._get_missing_packages()
+        return self.__missing_packages
+     
     def package(self, name: str, version_spec: Optional[str] = None, optional: bool = False) -> Package:
         """
         Adds a package to the dependency list.
@@ -237,15 +242,19 @@ class RuntimeDependencyManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.install_if_missing:
             self.install()
+        elif self.missing_packages:
+            for package in self.missing_packages:
+                logger.warning(f"Missing required runtime module: {package.name}{package.version_spec}")
+            sys.exit(1)
 
     def install(self):
         """
         Installs missing packages and imports all modules.
         """
-        missing_packages = self._get_missing_packages()
-        if missing_packages:
-            self._install_missing_packages(missing_packages)
+        if self.missing_packages:
+            self._install_missing_packages(self.missing_packages)
             importlib.invalidate_caches()
+
         self._import_all_modules()
 
     def _get_missing_packages(self) -> list[Package]:
@@ -266,7 +275,7 @@ class RuntimeDependencyManager:
                     missing_packages.append(pkg)
 
         if optional_missing_packages:
-            logger.warning("Optional packages not found: %s", ", ".join(pkg.name for pkg in optional_missing_packages))
+            logger.warning("Optional module not found: %s", ", ".join(pkg.name for pkg in optional_missing_packages))
 
         return missing_packages
 
@@ -283,6 +292,7 @@ class RuntimeDependencyManager:
         for imp in pkg.imports:
             if not self._try_import(imp):
                 return False
+
         return True
 
     def _try_import(self, imp: dict) -> bool:
