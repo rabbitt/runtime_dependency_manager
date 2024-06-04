@@ -27,7 +27,7 @@ with RuntimeDependencyManager(install_if_missing=True) as mgr:
         pkg.from_module('bson').import_module('ObjectId')
 
     with mgr.package('paramiko', '==2.7.2') as pkg:
-        pkg.import_modules('SSHClient', 'AutoAddPolicy', 'SSHConfig', 'SSHException')
+        pkg.from_module('paramiko').import_modules('SSHClient', 'AutoAddPolicy', 'SSHConfig', 'SSHException')
 
     with mgr.package('pyyaml', '>=5.4.1, <6.0.0', optional=True) as pkg:
         pkg.import_module('yaml')
