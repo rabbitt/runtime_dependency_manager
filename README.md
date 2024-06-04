@@ -14,7 +14,12 @@ pip install runtime_dependency_manager
 Here's an example of how to use `runtime_dependency_manager` in your script:
 
 ```python
-from runtime_dependency_manager import RuntimeDependencyManager
+try:
+    from runtime_dependency_manager import RuntimeDependencyManager
+except ImportError:
+    print(f"Error: missing required package runtime_dependency_manager. Please install via:\n"
+          f"\tpip install runtime_dependency_manager")
+    sys.exit(1)
 
 with RuntimeDependencyManager(install_if_missing=True) as mgr:
     mgr.index_url = "https://pypi.org/simple"
