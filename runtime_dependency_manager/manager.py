@@ -370,6 +370,8 @@ class RuntimeDependencyManager:
             cmd = cmd_base.copy()
             cmd.extend([f"{pkg.name}{pkg.version_spec}" if pkg.version_spec else pkg.name])
             
+            logger.info(f"Installing runtime dependency: {pkg.name} ...")
+
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             logging.debug(f"Running: {' '.join(shlex.quote(arg) for arg in cmd)}")
@@ -383,9 +385,9 @@ class RuntimeDependencyManager:
                 logger.error("Failed command: %s", failed_cmd)
                 logger.error("Command output: %s", result.stdout)
                 raise PackageInstallationError(f"Error installing package {pkg.name}")
-            else:
-                if pkg.version_spec:
-                    self._check_version_compatibility(pkg)
+
+            if pkg.version_spec:
+                self._check_version_compatibility(pkg)
 
     def _check_version_compatibility(self, pkg: Package):
         """
