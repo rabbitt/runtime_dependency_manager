@@ -289,8 +289,12 @@ class RuntimeDependencyManager:
         Returns:
             bool: True if all imports are available, False otherwise.
         """
-        for imp in pkg.imports:
-            if not self._try_import(imp):
+        if pkg.imports:
+            for imp in pkg.imports:
+                if not self._try_import(imp):
+                    return False
+        else:
+            if not self._try_import({"type": "import", "module": pkg.name}):
                 return False
 
         return True
