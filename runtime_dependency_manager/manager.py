@@ -45,6 +45,7 @@ import shlex
 import subprocess
 import sys
 
+from contextlib import contextmanager
 from importlib.metadata import version, PackageNotFoundError
 from packaging.requirements import Requirement
 from packaging.version import Version, InvalidVersion
@@ -256,6 +257,17 @@ class RuntimeDependencyManager:
             importlib.invalidate_caches()
 
         self._import_all_modules()
+
+    @contextmanager
+    def immediately_install_package(self, *args, **kwargs):
+        try:
+            self.package(*args, **kwargs)
+            self.install()
+        except Exception as e:
+            print(f"Unable to install package: `{args[0]}' due to:")
+            raise e
+        else: # only yield if error free
+            yield
 
     def _get_missing_packages(self) -> list[Package]:
         """

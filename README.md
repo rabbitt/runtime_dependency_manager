@@ -11,14 +11,16 @@ pip install runtime_dependency_manager
 ```
 ## Usage
 
-Here's an example of how to use `runtime_dependency_manager` in your script:
+Here's an example of how to use `runtime_dependency_manager` in your script, which could be done programmatically using the `from_module`, `import_module`, and `as_module` methods:
 
 ```python
 try:
     from runtime_dependency_manager import RuntimeDependencyManager
 except ImportError:
-    print(f"Error: missing required package runtime_dependency_manager. Please install via:\n"
-          f"\tpip install runtime_dependency_manager")
+    print(
+        f"Error: missing required package runtime_dependency_manager.\n"
+        f"Please install via:\n"
+        f"\tpip install runtime_dependency_manager")
     sys.exit(1)
 
 with RuntimeDependencyManager(install_if_missing=True) as mgr:
@@ -32,10 +34,43 @@ with RuntimeDependencyManager(install_if_missing=True) as mgr:
         pkg.from_module('bson').import_module('ObjectId')
 
     with mgr.package('paramiko', '==2.7.2') as pkg:
-        pkg.from_module('paramiko').import_modules('SSHClient', 'AutoAddPolicy', 'SSHConfig', 'SSHException')
+        pkg.from_module('paramiko').import_modules(
+            'SSHClient', 'AutoAddPolicy', 'SSHConfig', 'SSHException')
 
     with mgr.package('pyyaml', '>=5.4.1, <6.0.0', optional=True) as pkg:
         pkg.import_module('yaml')
+```
+
+Alternatively, if you don't need to programmatically import anything, you could help your IDE (e.g., VS Code, PyCharm, etc) be aware of your imports by doing the following:
+
+```python
+try:
+    from runtime_dependency_manager import RuntimeDependencyManager
+except ImportError:
+    print(
+        f"Error: missing required package runtime_dependency_manager.\n"
+        f"Please install via:\n"
+        f"\tpip install runtime_dependency_manager")
+    sys.exit(1)
+
+with RuntimeDependencyManager() as mgr:
+    # tries to install package addict and then runs the 'with' code block if
+    # the install was successful
+    with mgr.immediately_install_package('addict', '>=2.0'):
+        from addict import Dict as NestedDict
+
+    # tries to install package pymongo and then runs the 'with' code block if
+    # the install was successful
+    with mgr.immediately_install_package('pymongo', '>=3.11.0, <4.0.0'):
+        import pymongo
+        from bson import ObjectId
+
+    # tries to install package __nonexistant-package_ and then runs the 'with'
+    # code block if the install was successful. 
+    with mgr.immediately_install_package('_nonexistant-package_', '>1.0'):
+        # this import statement never runs because the package fails to 
+        # install.
+        import fooblahbaz
 ```
 
 ## API
