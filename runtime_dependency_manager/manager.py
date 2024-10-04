@@ -38,6 +38,8 @@ with RuntimeDependencyManager(install_if_missing=True) as mgr:
         pkg.import_module('yaml')
 """
 
+from __future__ import annotations
+
 import importlib
 import inspect
 import logging
@@ -90,7 +92,7 @@ class Package:
         self.optional = optional
         self.imports: list[dict] = []
 
-    def import_module(self, module_name: str) -> "Package":
+    def import_module(self, module_name: str) -> Package:
         """
         Adds an import statement for the specified module.
 
@@ -103,7 +105,7 @@ class Package:
         self.imports.append({'type': 'import', 'module': module_name})
         return self
 
-    def import_modules(self, *modules: str) -> "Package":
+    def import_modules(self, *modules: str) -> Package:
         """
         Adds import statements for multiple modules.
 
@@ -117,7 +119,7 @@ class Package:
             self.import_module(module_name)
         return self
 
-    def from_module(self, from_name: str) -> "ImportFrom":
+    def from_module(self, from_name: str) -> ImportFrom:
         """
         Creates an ImportFrom object for importing specific items from a module.
 
@@ -129,7 +131,7 @@ class Package:
         """
         return ImportFrom(from_name, self)
 
-    def as_module(self, alias: str) -> "Package":
+    def as_module(self, alias: str) -> Package:
         """
         Specifies an alias for the imported module.
 
@@ -143,7 +145,7 @@ class Package:
             self.imports[-1]['alias'] = alias
         return self
 
-    def __enter__(self) -> "Package":
+    def __enter__(self) -> Package:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -220,6 +222,17 @@ class RuntimeDependencyManager:
         if getattr(self, '__missing_packages', None) is None:
            self.__missing_packages = self._get_missing_packages()
         return self.__missing_packages
+
+    def __enter__(self) -> RuntimeDependencyManager:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.install_if_missing:
+            self.install()
+        elif self.missing_packages:
+            for package in self.missing_packages:
+                logger.warning(f"Missing required runtime module: {package.name}{package.version_spec}")
+            sys.exit(1)
      
     def package(self, name: str, version_spec: Optional[str] = None, optional: bool = False) -> Package:
         """
@@ -237,17 +250,6 @@ class RuntimeDependencyManager:
         self.packages.append(pkg)
         return pkg
 
-    def __enter__(self) -> "RuntimeDependencyManager":
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.install_if_missing:
-            self.install()
-        elif self.missing_packages:
-            for package in self.missing_packages:
-                logger.warning(f"Missing required runtime module: {package.name}{package.version_spec}")
-            sys.exit(1)
-
     def install(self):
         """
         Installs missing packages and imports all modules.
@@ -259,9 +261,12 @@ class RuntimeDependencyManager:
         self._import_all_modules()
 
     @contextmanager
-    def immediately_install_package(self, *args, **kwargs):
+    def immediately_install_package(self, *args, module_name: Optional[str] = None, **kwargs):
         try:
-            self.package(*args, **kwargs)
+            pkg = self.package(*args, **kwargs)
+            if module_name:
+                pkg.import_module(module_name)
+                
             self.install()
         except Exception as e:
             print(f"Unable to install package: `{args[0]}' due to:")

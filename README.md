@@ -65,6 +65,12 @@ with RuntimeDependencyManager() as mgr:
         import pymongo
         from bson import ObjectId
 
+    # tries to install package PyYAML and then runs the 'with' code block if
+    # the install was successful. Internally verifies installation using the
+    # provided 'module_name' (yaml), instead of the package name (PyYAML)
+    with mgr.immediately_install_package('PyYAML', '>=6', module_name='yaml'):
+        import yaml
+
     # tries to install package __nonexistant-package_ and then runs the 'with'
     # code block if the install was successful. 
     with mgr.immediately_install_package('_nonexistant-package_', '>1.0'):
@@ -86,8 +92,8 @@ with RuntimeDependencyManager() as mgr:
 
 #### Methods
 
-- **`package(name, version_spec=None, optional=False)`**: Adds a package to the dependency list.
-
+- **`package(name, version_spec=None, optional=False)`**: Adds a package to the dependency list of packages to install, which happens at the end of the with RuntimeDependencyManager with block.
+- **`immediately_install_package(name:str, version_spec:str=None, module_name:str=None)`**: Immediately installs the package, using the optionally provided module_name to verify it's installation
 ### Package
 
 #### Methods
